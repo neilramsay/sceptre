@@ -1,0 +1,352 @@
+#!/bin/bash
+
+function _sceptre () {
+  COMPREPLY=()
+  local cur prev words cword
+  _get_comp_words_by_ref cur prev words cword
+
+  # Completion processing variables
+  local command='sceptre'
+  local counter=1
+
+  # Completion "global" variables
+  local _sceptre_config_dir='.'
+
+  # Completion "global" state
+  local _sceptre_env
+  local _sceptre_stack
+
+  while [[ "$counter" -lt "$cword" ]]; do
+    case "${words[$counter]}" in
+      # Save "dir" so we can complete "environments"
+      --dir)
+        (( counter++ ))
+        _sceptre_config_dir="${words[$counter]}"
+        __expand_tilde_by_ref _sceptre_config_dir
+        ;;
+
+      # Throw-away variable values not used in completion
+      --var|--var-file|--output)
+        (( counter++ ))
+        ;;
+
+      # Throw-away options not used in completion
+      # The _sceptre_sceptre function will complete
+      -*)
+        ;;
+
+      # Probably a subcommand
+      # Stop processing options, so can be passed to
+      # function to process subcommand
+      *)
+        command="${words[$counter]}"
+        (( counter++ ))
+        break
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  local completions_func=_sceptre_${command//-/_}
+  declare -F "$completions_func" >/dev/null && $completions_func
+
+  return 0
+}
+complete -F _sceptre sceptre
+
+
+# __sceptre_env completes available environments based off
+# the configuration directory ($_sceptre_config_dir).
+# If already completed, collects environment value
+# for stack completion
+#
+# Assumes called in sequence correctly
+function __sceptre_env() {
+  if [[ "$counter" -eq "$cword" ]]; then
+    curdir=$(pwd)
+    cd "$_sceptre_config_dir/config" 2>/dev/null && _filedir -d || return
+    cd "$curdir" || return
+
+  else
+    _sceptre_env="${words[$counter]}"
+  fi
+  (( counter++ ))
+}
+
+
+# __sceptre_stack completes available stacks based off
+# the configuration directory ($_sceptre_config_dir),
+# the environment (_sceptre_env).
+# If already completed, collects stack value
+#
+# Assumes called in sequence correctly
+function __sceptre_stack() {
+  if [[ "$counter" -eq "$cword" ]]; then
+    local stacks
+    curdir=$(pwd)
+    cd "${_sceptre_config_dir}/config/${_sceptre_env}" 2>/dev/null || return
+    for file in *; do
+      if [[ ! -f "$file" ]]; then
+        continue
+      elif [[ "$file" == "config.yaml" ]]; then
+        continue
+      elif [[ "${file##*.}" != "yaml" ]]; then
+        continue
+      else
+        stacks+=( "${file%.yaml}" )
+      fi
+    done
+    COMPREPLY+=( $(compgen -W "${stacks[*]}" -- "$cur") )
+    cd "$curdir" || return
+
+  else
+    _sceptre_stack="${words[$counter]}"
+  fi
+  (( counter++ ))
+}
+
+function __sceptre_change_set() {
+  if [[ "$counter" -eq "$cword" ]]; then
+    changesets=( $(sceptre --dir "$_sceptre_config_dir" list-change-sets "${_sceptre_env}" "${_sceptre_stack}" 2>/dev/null \
+      | grep ChangeSetName | awk '{print $2}') )
+    COMPREPLY+=( $(compgen -W "${changesets[*]}" -- "$cur") )
+  fi
+  (( counter++ ))
+}
+
+#
+# Command handlers
+#
+
+function _sceptre_sceptre() {
+  # High level commands
+  local commands=(
+    continue-update-rollback
+    create-change-set
+    create-stack
+    delete-change-set
+    delete-env
+    delete-stack
+    describe-change-set
+    describe-env
+    describe-env-resources
+    describe-stack-outputs
+    describe-stack-resources
+    execute-change-set
+    generate-template
+    get-stack-policy
+    init
+    launch-env
+    launch-stack
+    list-change-sets
+    lock-stack
+    set-stack-policy
+    unlock-stack
+    update-stack
+    update-stack-cs
+    validate-template
+  )
+
+  # Local options
+  local local_options="
+    --version
+    --debug
+    --dir
+    --output
+    --no-color
+    --var
+    --var-file
+    --help
+  "
+
+  case "$prev" in
+    --help|--version|--var)
+        return 0
+        ;;
+    --output)
+        COMPREPLY=( $(compgen -W "yaml json" -- "$cur") )
+        return 0
+        ;;
+    --dir)
+        _filedir -d
+        return 0
+        ;;
+    --var-file)
+        _filedir
+        return 0
+        ;;
+  esac
+
+  case "$cur" in
+    -*)
+      COMPREPLY=( $( compgen -W "$local_options" -- "$cur" ) )
+      ;;
+    *)
+      COMPREPLY=( $( compgen -W "$local_options ${commands[*]}" -- "$cur" ))
+  esac
+}
+
+function _sceptre_continue_update_rollback() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_create_change_set() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_create_stack() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_delete_change_set() {
+  __sceptre_env
+  __sceptre_stack
+  __sceptre_change_set
+}
+
+function _sceptre_delete_env() {
+  __sceptre_env
+}
+
+function _sceptre_delete_stack() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_describe_change_set() {
+  __sceptre_env
+  __sceptre_stack
+  __sceptre_change_set
+}
+
+function _sceptre_describe_env() {
+  __sceptre_env
+}
+
+function _sceptre_describe_env_resources() {
+  __sceptre_env
+}
+
+function _sceptre_describe_stack_outputs() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_describe_stack_resources() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_execute_change_set() {
+  __sceptre_env
+  __sceptre_stack
+  __sceptre_change_set
+}
+
+function _sceptre_generate_template() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_get_stack_policy() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_init() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      env)
+        return
+        ;;
+      project)
+        return
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "env project" -- "$cur") )
+  fi
+}
+
+function _sceptre_launch_env() {
+  __sceptre_env
+}
+
+function _sceptre_launch_stack() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_list_change_sets() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_lock_stack() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_set_stack_policy() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --policy-file)
+        (( counter++ ))
+        ;;
+      *)
+        break
+    esac
+    (( counter++ ))
+  done
+
+  case "$prev" in
+    set-stack-policy)
+      COMPREPLY+=( $(compgen -W "--policy-file" -- "$cur") )
+      return
+      ;;
+    --policy-file)
+      _filedir
+      return
+      ;;
+  esac
+
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_update_stack() {
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_update_stack_cs() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --verbose)
+        ;;
+      *)
+        break
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--verbose" -- "$cur") )
+  fi
+  __sceptre_env
+  __sceptre_stack
+}
+
+function _sceptre_validate_template() {
+  __sceptre_env
+  __sceptre_stack
+}
