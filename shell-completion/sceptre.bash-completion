@@ -1,0 +1,592 @@
+#!/bin/bash
+
+function _sceptre () {
+  COMPREPLY=()
+  local cur prev words cword
+  _get_comp_words_by_ref cur prev words cword
+
+  # Completion processing variables
+  local command='sceptre'
+  local counter=1
+
+  # Completion "global" variables
+  local _sceptre_config_dir='.'
+
+  # Completion "global" state
+  local _sceptre_path
+  
+  while [[ "$counter" -lt "$cword" ]]; do
+    case "${words[$counter]}" in
+      # Save "dir" so we can complete "environments"
+      --dir)
+        (( counter++ ))
+        _sceptre_config_dir="${words[$counter]}"
+        __expand_tilde_by_ref _sceptre_config_dir
+        ;;
+
+      # Throw-away variable values not used in completion
+      --var|--var-file|--output)
+        (( counter++ ))
+        ;;
+
+      # Throw-away options not used in completion
+      # The _sceptre_sceptre function will complete
+      -*)
+        ;;
+
+      # Probably a subcommand
+      # Stop processing options, so can be passed to
+      # function to process subcommand
+      *)
+        command="${words[$counter]}"
+        (( counter++ ))
+        break
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  local completions_func=_sceptre_${command//-/_}
+  declare -F "$completions_func" >/dev/null && $completions_func
+
+  return 0
+}
+complete -F _sceptre sceptre
+
+
+# __sceptre_path completes available paths based off
+# the configuration directory ($_sceptre_config_dir).
+# It will list either directories (for environments),
+# or files (for individual stacks).
+# If already completed, collects stack value
+function __sceptre_path() {
+  if [[ "$counter" -eq "$cword" ]]; then
+    local stacks
+    
+    # Navigate to Sceptre configuration
+    pushd "${_sceptre_config_dir}/config" &>/dev/null || return
+
+    # Next for each directly, add non-config files
+    for dir in */; do
+      pushd ${dir} &>/dev/null
+      for file in *; do
+        # Only inspect files
+        if [[ ! -f "$file" ]]; then
+          continue
+        # Ignore config.yaml
+        elif [[ "$file" == "config.yaml" ]]; then
+          continue
+        # Ignore non-YAML files
+        elif [[ "${file##*.}" != "yaml" ]]; then
+          continue
+        # Add file without YAML suffix
+        else
+          stacks+=( "${dir}${file%.yaml}" )
+        fi
+      done
+      popd &>/dev/null
+    done
+    
+    # Add all environment directories, and stack files
+    COMPREPLY+=( $(compgen -o plusdirs -W "${stacks[*]}" -- "$cur") )
+    popd &>/dev/null || return
+
+  else
+    # Store PATH for later use
+    _sceptre_path="${words[$counter]}"
+  fi
+  (( counter++ ))
+}
+
+# __sceptre_change_set dynamically looks up available
+# change sets based off current PATH.
+# Will silently fail if sceptre is unable to list
+# change-sets, such as when no valid AWS credentials
+# are available.
+function __sceptre_change_set() {
+  if [[ "$counter" -eq "$cword" ]]; then
+    changesets=( $(sceptre --dir "$_sceptre_config_dir" list change-sets "${_sceptre_path}" 2>/dev/null \
+      | grep ChangeSetName | awk '{print $2}') )
+    COMPREPLY+=( $(compgen -W "${changesets[*]}" -- "$cur") )
+  fi
+  (( counter++ ))
+}
+
+#
+# Command handlers
+#
+
+# _sceptre_sceptre handles the root level sceptre command
+function _sceptre_sceptre() {
+  # High level commands
+  local commands=(
+    create
+    delete
+    describe
+    estimate-cost
+    execute
+    generate
+    init
+    launch
+    list
+    set-policy
+    status
+    update
+    validate
+  )
+
+  # Local options
+  local local_options="
+    --version
+    --debug
+    --dir
+    --output
+    --no-color
+    --var
+    --var-file
+    --help
+  "
+
+  case "$prev" in
+    --help|--version|--var)
+        return 0
+        ;;
+    --output)
+        COMPREPLY=( $(compgen -W "yaml json" -- "$cur") )
+        return 0
+        ;;
+    --dir)
+        _filedir -d
+        return 0
+        ;;
+    --var-file)
+        _filedir
+        return 0
+        ;;
+  esac
+
+  case "$cur" in
+    -*)
+      COMPREPLY=( $( compgen -W "$local_options" -- "$cur" ) )
+      ;;
+    *)
+      COMPREPLY=( $( compgen -W "$local_options ${commands[*]}" -- "$cur" ))
+  esac
+}
+
+# _sceptre_create - create second level command
+function _sceptre_create() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      -y|--yes)
+        (( counter++ ))
+        continue
+        ;;
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "-y --yes --help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+# _sceptre_create - create second level command
+function _sceptre_delete() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      -y|--yes)
+        (( counter++ ))
+        continue
+        ;;
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "-y --yes --help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_describe() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        command="${words[$counter]}"
+        break
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--help change-set policy" -- "$cur") )
+  else
+    (( counter++ ))
+    local completions_func=_sceptre_describe_${command//-/_}
+    declare -F "$completions_func" >/dev/null && $completions_func
+  fi
+}
+
+function _sceptre_describe_change_set() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      -v|--verbose)
+        (( counter++ ))
+        continue
+        ;;
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "-v --verbose --help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_describe_policy() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_estimate_cost() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_execute() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      -y|--yes)
+        (( counter++ ))
+        continue
+        ;;
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "-y --yes --help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_generate() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_init() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      env)
+        return
+        ;;
+      project)
+        return
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "env project" -- "$cur") )
+  fi
+}
+
+function _sceptre_launch() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      -y|--yes)
+        (( counter++ ))
+        continue
+        ;;
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "-y --yes --help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_list() {
+  local command
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        command="${words[$counter]}"
+        break
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--help change-sets outputs resources" -- "$cur") )
+  else
+    (( counter++ ))
+    local completions_func=_sceptre_list_${command//-/_}
+    declare -F "$completions_func" >/dev/null && $completions_func
+  fi
+}
+
+function _sceptre_list_change_sets() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_list_outputs() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      -e|--export)
+        (( counter++ ))
+        (( counter++ ))
+        continue
+        ;;
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "-e --export --help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_list_resources() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_set_policy() {
+  echo "Not implemented yet"
+  #   while [ "$counter" -lt "$cword" ]; do
+#     case "${words[$counter]}" in
+#       --policy-file)
+#         (( counter++ ))
+#         ;;
+#       *)
+#         break
+#     esac
+#     (( counter++ ))
+#   done
+
+#   case "$prev" in
+#     set-stack-policy)
+#       COMPREPLY+=( $(compgen -W "--policy-file" -- "$cur") )
+#       return
+#       ;;
+#     --policy-file)
+#       _filedir
+#       return
+#       ;;
+#   esac
+
+#   __sceptre_env
+#   __sceptre_stack
+}
+
+function _sceptre_status() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_update() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      -c|--change-set)
+        (( counter++ ))
+        continue
+        ;;
+      -v|--verbose)
+        (( counter++ ))
+        continue
+        ;;
+      -y|--yes)
+        (( counter++ ))
+        continue
+        ;;
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "-c --change-set -v --verbose -y --yes --help" -- "$cur") )
+    __sceptre_path
+  fi
+}
+
+function _sceptre_validate() {
+  while [ "$counter" -lt "$cword" ]; do
+    case "${words[$counter]}" in
+      --help)
+        (( counter++ ))
+        continue
+        ;;
+      *)
+        return
+        ;;
+    esac
+    (( counter++ ))
+  done
+
+  if [[ "$counter" -eq "$cword" ]]; then
+    COMPREPLY+=( $(compgen -W "--help" -- "$cur") )
+    __sceptre_path
+  fi
+}
